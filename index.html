@@ -90,8 +90,8 @@
         }
     </script>
 
-    <script src="https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.min.js" crossorigin="anonymous" onload="window.librariesLoaded.three = true"></script>
-    <script src="https://cdn.jsdelivr.net/npm/dat.gui@0.7.9/build/dat.gui.min.js" crossorigin="anonymous" onload="window.librariesLoaded.datgui = true"></script>
+    <script src="https://unpkg.com/three@0.160.0/build/three.min.js" crossorigin="anonymous" onload="window.librariesLoaded.three = true"></script>
+    <script src="https://unpkg.com/dat.gui@0.7.9/build/dat.gui.min.js" crossorigin="anonymous" onload="window.librariesLoaded.datgui = true"></script>
 
     <script id="voronoi-vertex" type="x-shader/x-vertex">
         varying vec2 vUv;
@@ -1112,7 +1112,7 @@
 
             if (!window.librariesLoaded.three || typeof THREE === 'undefined') {
                 console.error('THREE.js failed to load, trying fallback...');
-                loadFallback('THREE.js', 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r169/three.min.js', () => {
+                loadFallback('THREE.js', 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js', () => {
                     checkLibraries();
                     if (typeof THREE !== 'undefined') {
                         console.log('THREE.js loaded from fallback');
@@ -1126,7 +1126,7 @@
 
             if (!window.librariesLoaded.datgui || typeof dat === 'undefined') {
                 console.warn('dat.GUI failed to load, trying fallback...');
-                loadFallback('dat.GUI', 'https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.9/dat.gui.min.js', () => {
+                loadFallback('dat.GUI', 'https://cdn.jsdelivr.net/npm/dat.gui@0.7.9/build/dat.gui.min.js', () => {
                     initAppWithChecks();
                 });
                 return;

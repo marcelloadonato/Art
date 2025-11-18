@@ -66,9 +66,32 @@
         1-9: Toggle layers
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r169/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.169.0/examples/js/controls/OrbitControls.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/dat.gui@0.7.9/build/dat.gui.min.js"></script>
+    <script>
+        // Robust library loading with fallbacks
+        window.librariesLoaded = {
+            three: false,
+            datgui: false
+        };
+
+        function checkLibraries() {
+            if (typeof THREE !== 'undefined') window.librariesLoaded.three = true;
+            if (typeof dat !== 'undefined') window.librariesLoaded.datgui = true;
+        }
+
+        function loadFallback(library, url, callback) {
+            const script = document.createElement('script');
+            script.src = url;
+            script.crossOrigin = 'anonymous';
+            script.onload = callback;
+            script.onerror = () => {
+                console.error(`Failed to load ${library} from ${url}`);
+            };
+            document.head.appendChild(script);
+        }
+    </script>
+
+    <script src="https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.min.js" crossorigin="anonymous" onload="window.librariesLoaded.three = true"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dat.gui@0.7.9/build/dat.gui.min.js" crossorigin="anonymous" onload="window.librariesLoaded.datgui = true"></script>
 
     <script id="voronoi-vertex" type="x-shader/x-vertex">
         varying vec2 vUv;
@@ -1083,10 +1106,56 @@
             }
         }
 
-        // Start the application
-        window.addEventListener('DOMContentLoaded', () => {
-            new LivingTheorem();
-        });
+        // Start the application - wait for all external resources to load
+        function initApp() {
+            checkLibraries();
+
+            if (!window.librariesLoaded.three || typeof THREE === 'undefined') {
+                console.error('THREE.js failed to load, trying fallback...');
+                loadFallback('THREE.js', 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r169/three.min.js', () => {
+                    checkLibraries();
+                    if (typeof THREE !== 'undefined') {
+                        console.log('THREE.js loaded from fallback');
+                        initAppWithChecks();
+                    } else {
+                        document.getElementById('loading').innerHTML = 'Error: THREE.js failed to load<br><small>Please check your internet connection and refresh</small>';
+                    }
+                });
+                return;
+            }
+
+            if (!window.librariesLoaded.datgui || typeof dat === 'undefined') {
+                console.warn('dat.GUI failed to load, trying fallback...');
+                loadFallback('dat.GUI', 'https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.9/dat.gui.min.js', () => {
+                    initAppWithChecks();
+                });
+                return;
+            }
+
+            initAppWithChecks();
+        }
+
+        function initAppWithChecks() {
+            if (typeof THREE === 'undefined') {
+                document.getElementById('loading').innerHTML = 'Error: THREE.js required<br><small>Please check your internet connection</small>';
+                return;
+            }
+
+            try {
+                new LivingTheorem();
+            } catch (error) {
+                console.error('Error initializing Living Theorem:', error);
+                document.getElementById('loading').innerHTML = 'Error: Failed to initialize<br><small>' + error.message + '</small>';
+            }
+        }
+
+        // Wait for all resources
+        if (document.readyState === 'loading') {
+            window.addEventListener('load', initApp);
+        } else {
+            // Document already loaded
+            setTimeout(initApp, 100);
+        }
     </script>
 </body>
 </html>

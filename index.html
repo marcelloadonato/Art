@@ -1149,12 +1149,35 @@
             }
         }
 
-        // Wait for all resources
+        // Wait for all resources with retry mechanism
+        let initAttempts = 0;
+        const maxAttempts = 10;
+
+        function tryInit() {
+            initAttempts++;
+
+            checkLibraries();
+
+            // Check if libraries are ready
+            if (typeof THREE !== 'undefined' && typeof dat !== 'undefined') {
+                initApp();
+            } else if (initAttempts < maxAttempts) {
+                // Retry after a short delay
+                console.log(`Waiting for libraries... attempt ${initAttempts}/${maxAttempts}`);
+                setTimeout(tryInit, 200);
+            } else {
+                // Max attempts reached, try to load anyway
+                console.warn('Max initialization attempts reached, attempting to load...');
+                initApp();
+            }
+        }
+
+        // Start initialization after page load
         if (document.readyState === 'loading') {
-            window.addEventListener('load', initApp);
+            window.addEventListener('load', () => setTimeout(tryInit, 100));
         } else {
             // Document already loaded
-            setTimeout(initApp, 100);
+            setTimeout(tryInit, 100);
         }
     </script>
 </body>

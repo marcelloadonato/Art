@@ -1,0 +1,1092 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Living Theorem - Mathematical Art Playground</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            overflow: hidden;
+            font-family: 'Courier New', monospace;
+            background: #000;
+        }
+
+        #canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+            touch-action: none;
+        }
+
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 12px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            border-radius: 5px;
+            pointer-events: none;
+            font-family: monospace;
+            line-height: 1.4;
+        }
+
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #fff;
+            font-size: 24px;
+            text-align: center;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="loading">Living Theorem<br><span style="font-size:14px;">Loading mathematical beauty...</span></div>
+    <div id="info" class="hidden">
+        <strong>Living Theorem</strong><br>
+        Drag: Draw Lissajous curves<br>
+        Scroll: Adjust parameters<br>
+        Click: Add/remove Voronoi site<br>
+        Space: Pause/Resume<br>
+        R: Reset | S: Screenshot | G: Record GIF<br>
+        1-9: Toggle layers
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r169/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.169.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dat.gui@0.7.9/build/dat.gui.min.js"></script>
+
+    <script id="voronoi-vertex" type="x-shader/x-vertex">
+        varying vec2 vUv;
+        void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+    </script>
+
+    <script id="voronoi-fragment" type="x-shader/x-fragment">
+        precision highp float;
+
+        uniform float uTime;
+        uniform vec2 uResolution;
+        uniform vec2 uVoronoiSeeds[32];
+        uniform int uNumSeeds;
+        uniform vec3 uPalette[8];
+        uniform float uMandelbrotDepth;
+        uniform float uRoseK;
+
+        varying vec2 vUv;
+
+        const float PHI = 1.618033988749895;
+        const float PI = 3.141592653589793;
+
+        // Simplex noise (for curl noise base)
+        vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+        vec2 mod289(vec2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+        vec3 permute(vec3 x) { return mod289(((x*34.0)+1.0)*x); }
+
+        float snoise(vec2 v) {
+            const vec4 C = vec4(0.211324865405187, 0.366025403784439, -0.577350269189626, 0.024390243902439);
+            vec2 i  = floor(v + dot(v, C.yy));
+            vec2 x0 = v - i + dot(i, C.xx);
+            vec2 i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+            vec4 x12 = x0.xyxy + C.xxzz;
+            x12.xy -= i1;
+            i = mod289(i);
+            vec3 p = permute(permute(i.y + vec3(0.0, i1.y, 1.0)) + i.x + vec3(0.0, i1.x, 1.0));
+            vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
+            m = m*m;
+            m = m*m;
+            vec3 x = 2.0 * fract(p * C.www) - 1.0;
+            vec3 h = abs(x) - 0.5;
+            vec3 ox = floor(x + 0.5);
+            vec3 a0 = x - ox;
+            m *= 1.79284291400159 - 0.85373472095314 * (a0*a0 + h*h);
+            vec3 g;
+            g.x  = a0.x  * x0.x  + h.x  * x0.y;
+            g.yz = a0.yz * x12.xz + h.yz * x12.yw;
+            return 130.0 * dot(m, g);
+        }
+
+        // Curl noise for flow field
+        vec2 curlNoise(vec2 p) {
+            float eps = 0.01;
+            float n1 = snoise(p + vec2(eps, 0.0));
+            float n2 = snoise(p - vec2(eps, 0.0));
+            float n3 = snoise(p + vec2(0.0, eps));
+            float n4 = snoise(p - vec2(0.0, eps));
+            float dx = (n1 - n2) / (2.0 * eps);
+            float dy = (n3 - n4) / (2.0 * eps);
+            return vec2(dy, -dx);
+        }
+
+        // Golden ratio color generation
+        vec3 goldenColor(float t) {
+            float hue = mod(t * PHI, 1.0);
+            float sat = 0.6 + 0.3 * sin(t * PI);
+            float val = 0.8 + 0.2 * cos(t * PI * PHI);
+
+            vec3 c = vec3(hue, sat, val);
+            vec3 rgb = clamp(abs(mod(c.x * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
+            return c.z * mix(vec3(1.0), rgb, c.y);
+        }
+
+        // Mandelbrot iteration
+        vec3 mandelbrot(vec2 c, float maxIter) {
+            vec2 z = vec2(0.0);
+            float iter = 0.0;
+
+            for (float i = 0.0; i < 256.0; i++) {
+                if (i >= maxIter) break;
+
+                z = vec2(z.x * z.x - z.y * z.y, 2.0 * z.x * z.y) + c;
+
+                if (dot(z, z) > 4.0) {
+                    float smooth_i = iter + 1.0 - log(log(length(z))) / log(2.0);
+                    float t = smooth_i / maxIter;
+                    return goldenColor(t * PHI);
+                }
+
+                iter += 1.0;
+            }
+
+            return vec3(0.0);
+        }
+
+        // Voronoi distance field
+        vec3 voronoi(vec2 uv) {
+            float minDist = 999999.0;
+            int closestIdx = 0;
+            vec2 closestPoint = vec2(0.0);
+
+            for (int i = 0; i < 32; i++) {
+                if (i >= uNumSeeds) break;
+
+                vec2 seed = uVoronoiSeeds[i];
+                float dist = distance(uv, seed);
+
+                if (dist < minDist) {
+                    minDist = dist;
+                    closestIdx = i;
+                    closestPoint = seed;
+                }
+            }
+
+            // Calculate second closest for edge detection
+            float minDist2 = 999999.0;
+            for (int i = 0; i < 32; i++) {
+                if (i >= uNumSeeds || i == closestIdx) continue;
+
+                vec2 seed = uVoronoiSeeds[i];
+                float dist = distance(uv, seed);
+                minDist2 = min(minDist2, dist);
+            }
+
+            float edge = smoothstep(0.0, 0.01, minDist2 - minDist);
+
+            return vec3(minDist, edge, float(closestIdx));
+        }
+
+        // Parametric rose
+        float rose(float angle, float k) {
+            return cos(k * angle);
+        }
+
+        // Prime checker (simple, up to ~1000)
+        bool isPrime(int n) {
+            if (n < 2) return false;
+            if (n == 2) return true;
+            if (mod(float(n), 2.0) == 0.0) return false;
+
+            for (int i = 3; i < 32; i += 2) {
+                if (i * i > n) break;
+                if (mod(float(n), float(i)) == 0.0) return false;
+            }
+
+            return true;
+        }
+
+        void main() {
+            vec2 uv = vUv;
+            vec2 p = (vUv - 0.5) * 2.0;
+            p.x *= uResolution.x / uResolution.y;
+
+            // Apply curl noise flow
+            vec2 flowOffset = curlNoise(p * 2.0 + uTime * 0.1) * 0.05;
+            vec2 flowedUV = vUv + flowOffset;
+            vec2 flowedP = p + flowOffset;
+
+            // Voronoi field
+            vec3 vor = voronoi(vUv);
+            float voronoiDist = vor.x;
+            float voronoiEdge = vor.y;
+            int cellIdx = int(vor.z);
+
+            // Mandelbrot in each cell (scaled and offset)
+            vec2 mandelbrotUV = (p - uVoronoiSeeds[cellIdx]) * 3.0;
+            vec3 fractalColor = mandelbrot(mandelbrotUV, uMandelbrotDepth);
+
+            // Parametric rose boundary
+            float angle = atan(p.y, p.x);
+            float radius = length(p);
+            float roseR = rose(angle, uRoseK) * 0.8;
+            float roseDist = abs(radius - abs(roseR));
+            float roseGlow = exp(-roseDist * 20.0);
+
+            // Ulam prime spiral
+            float spiralAngle = uTime * 0.5;
+            vec2 spiralUV = vec2(cos(spiralAngle), sin(spiralAngle)) * 0.3;
+            int spiralN = int(length(p * 100.0));
+            float primeGlow = isPrime(spiralN) ? 0.5 : 0.0;
+
+            // Base color from golden ratio
+            vec3 baseColor = goldenColor(float(cellIdx) / float(uNumSeeds));
+
+            // Mix everything
+            vec3 color = baseColor * 0.2;
+            color += fractalColor * 0.5;
+            color += voronoiEdge * goldenColor(uTime * 0.1);
+            color += roseGlow * goldenColor(uTime * 0.05 + 0.5);
+            color += primeGlow * vec3(1.0, 0.7, 0.3);
+
+            // Background gradient
+            vec3 bgGradient = mix(
+                vec3(0.0, 0.02, 0.1),
+                vec3(0.0, 0.12, 0.3),
+                vUv.y
+            );
+
+            color = mix(bgGradient, color, smoothstep(0.0, 0.1, voronoiDist));
+
+            gl_FragColor = vec4(color, 1.0);
+        }
+    </script>
+
+    <script id="particle-vertex" type="x-shader/x-vertex">
+        uniform float uTime;
+        uniform float uSize;
+        uniform float uFlowSpeed;
+
+        attribute vec3 color;
+        attribute float phase;
+
+        varying vec3 vColor;
+        varying float vAlpha;
+
+        const float PHI = 1.618033988749895;
+
+        // Simplex noise for curl (3D version)
+        vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+        vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+        vec4 permute(vec4 x) { return mod289(((x*34.0)+1.0)*x); }
+        vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+
+        float snoise3d(vec3 v) {
+            const vec2 C = vec2(1.0/6.0, 1.0/3.0);
+            const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
+            vec3 i  = floor(v + dot(v, C.yyy));
+            vec3 x0 = v - i + dot(i, C.xxx);
+            vec3 g = step(x0.yzx, x0.xyz);
+            vec3 l = 1.0 - g;
+            vec3 i1 = min(g.xyz, l.zxy);
+            vec3 i2 = max(g.xyz, l.zxy);
+            vec3 x1 = x0 - i1 + C.xxx;
+            vec3 x2 = x0 - i2 + C.yyy;
+            vec3 x3 = x0 - D.yyy;
+            i = mod289(i);
+            vec4 p = permute(permute(permute(i.z + vec4(0.0, i1.z, i2.z, 1.0)) + i.y + vec4(0.0, i1.y, i2.y, 1.0)) + i.x + vec4(0.0, i1.x, i2.x, 1.0));
+            float n_ = 0.142857142857;
+            vec3 ns = n_ * D.wyz - D.xzx;
+            vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
+            vec4 x_ = floor(j * ns.z);
+            vec4 y_ = floor(j - 7.0 * x_);
+            vec4 x = x_ *ns.x + ns.yyyy;
+            vec4 y = y_ *ns.x + ns.yyyy;
+            vec4 h = 1.0 - abs(x) - abs(y);
+            vec4 b0 = vec4(x.xy, y.xy);
+            vec4 b1 = vec4(x.zw, y.zw);
+            vec4 s0 = floor(b0)*2.0 + 1.0;
+            vec4 s1 = floor(b1)*2.0 + 1.0;
+            vec4 sh = -step(h, vec4(0.0));
+            vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy;
+            vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww;
+            vec3 p0 = vec3(a0.xy,h.x);
+            vec3 p1 = vec3(a0.zw,h.y);
+            vec3 p2 = vec3(a1.xy,h.z);
+            vec3 p3 = vec3(a1.zw,h.w);
+            vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2,p2), dot(p3,p3)));
+            p0 *= norm.x;
+            p1 *= norm.y;
+            p2 *= norm.z;
+            p3 *= norm.w;
+            vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
+            m = m * m;
+            return 42.0 * dot(m*m, vec4(dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3)));
+        }
+
+        // 3D curl noise
+        vec3 curlNoise3d(vec3 p) {
+            float eps = 0.1;
+            float n1, n2, a, b;
+            vec3 curl = vec3(0.0);
+
+            n1 = snoise3d(vec3(p.x, p.y + eps, p.z));
+            n2 = snoise3d(vec3(p.x, p.y - eps, p.z));
+            a = (n1 - n2) / (2.0 * eps);
+
+            n1 = snoise3d(vec3(p.x, p.y, p.z + eps));
+            n2 = snoise3d(vec3(p.x, p.y, p.z - eps));
+            b = (n1 - n2) / (2.0 * eps);
+
+            curl.x = a - b;
+
+            n1 = snoise3d(vec3(p.x, p.y, p.z + eps));
+            n2 = snoise3d(vec3(p.x, p.y, p.z - eps));
+            a = (n1 - n2) / (2.0 * eps);
+
+            n1 = snoise3d(vec3(p.x + eps, p.y, p.z));
+            n2 = snoise3d(vec3(p.x - eps, p.y, p.z));
+            b = (n1 - n2) / (2.0 * eps);
+
+            curl.y = a - b;
+
+            n1 = snoise3d(vec3(p.x + eps, p.y, p.z));
+            n2 = snoise3d(vec3(p.x - eps, p.y, p.z));
+            a = (n1 - n2) / (2.0 * eps);
+
+            n1 = snoise3d(vec3(p.x, p.y + eps, p.z));
+            n2 = snoise3d(vec3(p.x, p.y - eps, p.z));
+            b = (n1 - n2) / (2.0 * eps);
+
+            curl.z = a - b;
+
+            return curl;
+        }
+
+        void main() {
+            vColor = color;
+
+            // Curl noise flow field
+            vec3 flowField = curlNoise3d(position * 0.5 + uTime * 0.2) * uFlowSpeed;
+
+            // Harmonic breathing
+            float breathe = 1.0 + 0.2 * sin(uTime * 2.0 + phase);
+            vec3 pos = position * breathe + flowField * 0.3;
+
+            vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+            gl_Position = projectionMatrix * mvPosition;
+
+            float dist = length(mvPosition.xyz);
+            gl_PointSize = uSize * (300.0 / dist) * breathe;
+
+            vAlpha = 1.0 - smoothstep(0.0, 30.0, dist);
+        }
+    </script>
+
+    <script id="particle-fragment" type="x-shader/x-fragment">
+        precision highp float;
+
+        varying vec3 vColor;
+        varying float vAlpha;
+
+        void main() {
+            vec2 center = gl_PointCoord - 0.5;
+            float dist = length(center);
+
+            if (dist > 0.5) discard;
+
+            float alpha = (1.0 - smoothstep(0.3, 0.5, dist)) * vAlpha;
+
+            gl_FragColor = vec4(vColor, alpha);
+        }
+    </script>
+
+    <script id="lissajous-vertex" type="x-shader/x-vertex">
+        uniform float uTime;
+
+        attribute float linePhase;
+
+        varying vec3 vColor;
+
+        const float PHI = 1.618033988749895;
+
+        void main() {
+            vec3 goldenColor = vec3(
+                0.5 + 0.5 * cos(linePhase * PHI),
+                0.5 + 0.5 * cos(linePhase * PHI + 2.094),
+                0.5 + 0.5 * cos(linePhase * PHI + 4.189)
+            );
+
+            vColor = goldenColor;
+
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+    </script>
+
+    <script id="lissajous-fragment" type="x-shader/x-fragment">
+        precision highp float;
+
+        varying vec3 vColor;
+
+        void main() {
+            gl_FragColor = vec4(vColor, 0.8);
+        }
+    </script>
+
+    <script>
+        // ============================================================================
+        // MAIN APPLICATION
+        // ============================================================================
+
+        class LivingTheorem {
+            constructor() {
+                this.canvas = document.getElementById('canvas');
+                this.loadingDiv = document.getElementById('loading');
+                this.infoDiv = document.getElementById('info');
+
+                this.params = {
+                    // Voronoi
+                    numVoronoiSeeds: 16,
+                    voronoiDrift: 0.5,
+
+                    // Mandelbrot
+                    mandelbrotDepth: 64,
+                    mandelbrotZoom: 1.0,
+
+                    // Rose
+                    roseK: 5.0,
+
+                    // Particles
+                    particleCount: 10000,
+                    particleSize: 3.0,
+
+                    // Flow
+                    flowSpeed: 1.0,
+
+                    // Time
+                    timeScale: 1.0,
+                    paused: false,
+
+                    // Polyhedron
+                    polyMorph: 0.0, // 0=cube, 1=dodeca, 2=icosa
+
+                    // Symmetry
+                    symmetryAngle: 0,
+
+                    // Layers
+                    showVoronoi: true,
+                    showMandelbrot: true,
+                    showRose: true,
+                    showParticles: true,
+                    showLissajous: true,
+                    showPrimes: true,
+                    showPolyhedron: true,
+
+                    // Actions
+                    reset: () => this.reset(),
+                    screenshot: () => this.screenshot(),
+                    recordGIF: () => this.toggleGIFRecording()
+                };
+
+                this.PHI = 1.618033988749895;
+                this.time = 0;
+                this.clock = new THREE.Clock();
+
+                this.voronoiSeeds = [];
+                this.lissajousPoints = [];
+                this.fourierCircles = [];
+                this.isDrawing = false;
+                this.isRecording = false;
+                this.recordedFrames = [];
+
+                this.init();
+            }
+
+            init() {
+                this.setupRenderer();
+                this.setupScene();
+                this.setupCamera();
+                this.setupVoronoiSeeds();
+                this.setupMaterials();
+                this.setupGeometry();
+                this.setupParticles();
+                this.setupGUI();
+                this.setupInteraction();
+
+                this.loadingDiv.classList.add('hidden');
+                this.infoDiv.classList.remove('hidden');
+
+                this.animate();
+            }
+
+            setupRenderer() {
+                this.renderer = new THREE.WebGLRenderer({
+                    canvas: this.canvas,
+                    antialias: true,
+                    alpha: false,
+                    preserveDrawingBuffer: true
+                });
+
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+                this.renderer.setClearColor(0x000428);
+            }
+
+            setupScene() {
+                this.scene = new THREE.Scene();
+                this.scene.fog = new THREE.Fog(0x000428, 10, 50);
+            }
+
+            setupCamera() {
+                this.camera = new THREE.PerspectiveCamera(
+                    75,
+                    window.innerWidth / window.innerHeight,
+                    0.1,
+                    1000
+                );
+                this.camera.position.z = 5;
+            }
+
+            setupVoronoiSeeds() {
+                // Initialize Voronoi seeds using golden angle
+                const goldenAngle = Math.PI * 2 / (this.PHI * this.PHI);
+
+                for (let i = 0; i < this.params.numVoronoiSeeds; i++) {
+                    const angle = i * goldenAngle;
+                    const radius = 0.3 + 0.4 * Math.sqrt(i / this.params.numVoronoiSeeds);
+
+                    this.voronoiSeeds.push(new THREE.Vector2(
+                        0.5 + Math.cos(angle) * radius,
+                        0.5 + Math.sin(angle) * radius
+                    ));
+                }
+            }
+
+            setupMaterials() {
+                // Voronoi plane material
+                const seedsArray = new Float32Array(64); // 32 seeds * 2 coords
+                for (let i = 0; i < this.voronoiSeeds.length; i++) {
+                    seedsArray[i * 2] = this.voronoiSeeds[i].x;
+                    seedsArray[i * 2 + 1] = this.voronoiSeeds[i].y;
+                }
+
+                this.voronoiUniforms = {
+                    uTime: { value: 0 },
+                    uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+                    uVoronoiSeeds: { value: seedsArray },
+                    uNumSeeds: { value: this.params.numVoronoiSeeds },
+                    uPalette: { value: this.generateGoldenPalette(8) },
+                    uMandelbrotDepth: { value: this.params.mandelbrotDepth },
+                    uRoseK: { value: this.params.roseK }
+                };
+
+                this.voronoiMaterial = new THREE.ShaderMaterial({
+                    uniforms: this.voronoiUniforms,
+                    vertexShader: document.getElementById('voronoi-vertex').textContent,
+                    fragmentShader: document.getElementById('voronoi-fragment').textContent,
+                    side: THREE.DoubleSide
+                });
+            }
+
+            setupGeometry() {
+                // Background plane with Voronoi + Mandelbrot
+                const planeGeom = new THREE.PlaneGeometry(20, 20);
+                this.voronoiPlane = new THREE.Mesh(planeGeom, this.voronoiMaterial);
+                this.voronoiPlane.position.z = -3;
+                this.scene.add(this.voronoiPlane);
+
+                // Polyhedral morphing geometry
+                this.setupPolyhedron();
+
+                // Lissajous curve line
+                this.lissajousGeometry = new THREE.BufferGeometry();
+                this.lissajousMaterial = new THREE.ShaderMaterial({
+                    uniforms: {
+                        uTime: { value: 0 }
+                    },
+                    vertexShader: document.getElementById('lissajous-vertex').textContent,
+                    fragmentShader: document.getElementById('lissajous-fragment').textContent,
+                    transparent: true,
+                    blending: THREE.AdditiveBlending
+                });
+
+                this.lissajousLine = new THREE.Line(
+                    this.lissajousGeometry,
+                    this.lissajousMaterial
+                );
+                this.scene.add(this.lissajousLine);
+            }
+
+            setupPolyhedron() {
+                // Create morphing polyhedron using golden ratio scaling
+                const geom = new THREE.IcosahedronGeometry(1, 1);
+                const material = new THREE.MeshBasicMaterial({
+                    color: 0x00ffff,
+                    wireframe: true,
+                    transparent: true,
+                    opacity: 0.3
+                });
+
+                this.polyhedron = new THREE.Mesh(geom, material);
+                this.polyhedron.position.z = 0;
+                this.scene.add(this.polyhedron);
+
+                // Store original positions for morphing
+                this.polyOriginalPositions = geom.attributes.position.array.slice();
+            }
+
+            setupParticles() {
+                const geometry = new THREE.BufferGeometry();
+                const positions = new Float32Array(this.params.particleCount * 3);
+                const colors = new Float32Array(this.params.particleCount * 3);
+                const phases = new Float32Array(this.params.particleCount);
+
+                // Distribute particles using Fibonacci sphere
+                for (let i = 0; i < this.params.particleCount; i++) {
+                    const phi = Math.acos(1 - 2 * (i + 0.5) / this.params.particleCount);
+                    const theta = Math.PI * (1 + Math.sqrt(5)) * i;
+
+                    const radius = 2 + Math.random() * 3;
+
+                    positions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
+                    positions[i * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
+                    positions[i * 3 + 2] = radius * Math.cos(phi);
+
+                    const color = this.goldenColor(i / this.params.particleCount);
+                    colors[i * 3] = color.r;
+                    colors[i * 3 + 1] = color.g;
+                    colors[i * 3 + 2] = color.b;
+
+                    phases[i] = Math.random() * Math.PI * 2;
+                }
+
+                geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+                geometry.setAttribute('phase', new THREE.BufferAttribute(phases, 1));
+
+                const material = new THREE.ShaderMaterial({
+                    uniforms: {
+                        uTime: { value: 0 },
+                        uSize: { value: this.params.particleSize },
+                        uFlowSpeed: { value: this.params.flowSpeed }
+                    },
+                    vertexShader: document.getElementById('particle-vertex').textContent,
+                    fragmentShader: document.getElementById('particle-fragment').textContent,
+                    transparent: true,
+                    blending: THREE.AdditiveBlending,
+                    depthWrite: false
+                });
+
+                this.particles = new THREE.Points(geometry, material);
+                this.scene.add(this.particles);
+            }
+
+            setupGUI() {
+                this.gui = new dat.GUI();
+
+                const voronoiFolder = this.gui.addFolder('Voronoi');
+                voronoiFolder.add(this.params, 'numVoronoiSeeds', 4, 32, 1).onChange(() => this.updateVoronoiSeeds());
+                voronoiFolder.add(this.params, 'voronoiDrift', 0, 2);
+
+                const fractalFolder = this.gui.addFolder('Mandelbrot');
+                fractalFolder.add(this.params, 'mandelbrotDepth', 16, 256, 8);
+                fractalFolder.add(this.params, 'mandelbrotZoom', 0.1, 5);
+
+                const roseFolder = this.gui.addFolder('Parametric Rose');
+                roseFolder.add(this.params, 'roseK', 2, 20, 0.1);
+
+                const particleFolder = this.gui.addFolder('Particles');
+                particleFolder.add(this.params, 'particleSize', 1, 10);
+                particleFolder.add(this.params, 'flowSpeed', 0, 5);
+
+                const timeFolder = this.gui.addFolder('Time');
+                timeFolder.add(this.params, 'timeScale', 0, 5);
+                timeFolder.add(this.params, 'paused');
+
+                const polyFolder = this.gui.addFolder('Polyhedron');
+                polyFolder.add(this.params, 'polyMorph', 0, 2);
+
+                const layersFolder = this.gui.addFolder('Layers');
+                layersFolder.add(this.params, 'showVoronoi');
+                layersFolder.add(this.params, 'showParticles');
+                layersFolder.add(this.params, 'showLissajous');
+                layersFolder.add(this.params, 'showPolyhedron');
+
+                this.gui.add(this.params, 'reset');
+                this.gui.add(this.params, 'screenshot');
+                this.gui.add(this.params, 'recordGIF');
+            }
+
+            setupInteraction() {
+                // Mouse/touch interaction
+                this.mouse = new THREE.Vector2();
+                this.mouseNDC = new THREE.Vector2();
+
+                const getEventCoords = (e) => {
+                    const touch = e.touches ? e.touches[0] : e;
+                    return {
+                        x: touch.clientX,
+                        y: touch.clientY
+                    };
+                };
+
+                const onPointerDown = (e) => {
+                    this.isDrawing = true;
+                    this.lissajousPoints = [];
+                    const coords = getEventCoords(e);
+                    this.updateMouse(coords.x, coords.y);
+                };
+
+                const onPointerMove = (e) => {
+                    const coords = getEventCoords(e);
+                    this.updateMouse(coords.x, coords.y);
+
+                    if (this.isDrawing) {
+                        this.lissajousPoints.push({
+                            x: this.mouseNDC.x * 3,
+                            y: this.mouseNDC.y * 3,
+                            z: 0
+                        });
+
+                        if (this.lissajousPoints.length > 500) {
+                            this.lissajousPoints.shift();
+                        }
+
+                        this.updateLissajousCurve();
+                    }
+                };
+
+                const onPointerUp = (e) => {
+                    if (this.isDrawing) {
+                        this.isDrawing = false;
+                        this.computeFourierDecomposition();
+                    }
+                };
+
+                const onClick = (e) => {
+                    if (!this.isDrawing && this.lissajousPoints.length === 0) {
+                        // Add/remove Voronoi seed
+                        const uv = new THREE.Vector2(
+                            this.mouse.x / window.innerWidth,
+                            1.0 - this.mouse.y / window.innerHeight
+                        );
+
+                        this.addVoronoiSeed(uv);
+                    }
+                };
+
+                const onWheel = (e) => {
+                    e.preventDefault();
+
+                    // Adjust rose petals
+                    const delta = e.deltaY > 0 ? -0.1 : 0.1;
+                    this.params.roseK = Math.max(2, Math.min(20, this.params.roseK + delta));
+                };
+
+                this.canvas.addEventListener('mousedown', onPointerDown);
+                this.canvas.addEventListener('mousemove', onPointerMove);
+                this.canvas.addEventListener('mouseup', onPointerUp);
+                this.canvas.addEventListener('click', onClick);
+                this.canvas.addEventListener('wheel', onWheel, { passive: false });
+
+                this.canvas.addEventListener('touchstart', onPointerDown);
+                this.canvas.addEventListener('touchmove', onPointerMove);
+                this.canvas.addEventListener('touchend', onPointerUp);
+
+                // Keyboard
+                window.addEventListener('keydown', (e) => {
+                    switch(e.key.toLowerCase()) {
+                        case ' ':
+                            this.params.paused = !this.params.paused;
+                            break;
+                        case 'r':
+                            this.reset();
+                            break;
+                        case 's':
+                            this.screenshot();
+                            break;
+                        case 'g':
+                            this.toggleGIFRecording();
+                            break;
+                        case '1':
+                            this.params.showVoronoi = !this.params.showVoronoi;
+                            break;
+                        case '2':
+                            this.params.showParticles = !this.params.showParticles;
+                            break;
+                        case '3':
+                            this.params.showLissajous = !this.params.showLissajous;
+                            break;
+                        case '4':
+                            this.params.showPolyhedron = !this.params.showPolyhedron;
+                            break;
+                    }
+                });
+
+                // Resize
+                window.addEventListener('resize', () => {
+                    this.camera.aspect = window.innerWidth / window.innerHeight;
+                    this.camera.updateProjectionMatrix();
+                    this.renderer.setSize(window.innerWidth, window.innerHeight);
+                    this.voronoiUniforms.uResolution.value.set(window.innerWidth, window.innerHeight);
+                });
+            }
+
+            updateMouse(x, y) {
+                this.mouse.x = x;
+                this.mouse.y = y;
+                this.mouseNDC.x = (x / window.innerWidth) * 2 - 1;
+                this.mouseNDC.y = -(y / window.innerHeight) * 2 + 1;
+            }
+
+            updateVoronoiSeeds() {
+                this.voronoiSeeds = [];
+                this.setupVoronoiSeeds();
+
+                const seedsArray = new Float32Array(64);
+                for (let i = 0; i < this.voronoiSeeds.length; i++) {
+                    seedsArray[i * 2] = this.voronoiSeeds[i].x;
+                    seedsArray[i * 2 + 1] = this.voronoiSeeds[i].y;
+                }
+
+                this.voronoiUniforms.uVoronoiSeeds.value = seedsArray;
+                this.voronoiUniforms.uNumSeeds.value = this.params.numVoronoiSeeds;
+            }
+
+            addVoronoiSeed(uv) {
+                if (this.voronoiSeeds.length < 32) {
+                    this.voronoiSeeds.push(uv.clone());
+                    this.params.numVoronoiSeeds = this.voronoiSeeds.length;
+                    this.updateVoronoiSeeds();
+                }
+            }
+
+            updateLissajousCurve() {
+                if (this.lissajousPoints.length < 2) return;
+
+                const positions = new Float32Array(this.lissajousPoints.length * 3);
+                const phases = new Float32Array(this.lissajousPoints.length);
+
+                for (let i = 0; i < this.lissajousPoints.length; i++) {
+                    const pt = this.lissajousPoints[i];
+                    positions[i * 3] = pt.x;
+                    positions[i * 3 + 1] = pt.y;
+                    positions[i * 3 + 2] = pt.z;
+                    phases[i] = i / this.lissajousPoints.length;
+                }
+
+                this.lissajousGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                this.lissajousGeometry.setAttribute('linePhase', new THREE.BufferAttribute(phases, 1));
+            }
+
+            computeFourierDecomposition() {
+                // Simple DFT for demonstration
+                if (this.lissajousPoints.length < 3) return;
+
+                this.fourierCircles = [];
+                const N = Math.min(this.lissajousPoints.length, 20);
+
+                for (let k = 0; k < N; k++) {
+                    let re = 0, im = 0;
+
+                    for (let n = 0; n < this.lissajousPoints.length; n++) {
+                        const angle = (-2 * Math.PI * k * n) / this.lissajousPoints.length;
+                        re += this.lissajousPoints[n].x * Math.cos(angle);
+                        im += this.lissajousPoints[n].x * Math.sin(angle);
+                    }
+
+                    re /= this.lissajousPoints.length;
+                    im /= this.lissajousPoints.length;
+
+                    const amplitude = Math.sqrt(re * re + im * im);
+                    const phase = Math.atan2(im, re);
+
+                    if (amplitude > 0.01) {
+                        this.fourierCircles.push({
+                            freq: k,
+                            amp: amplitude,
+                            phase: phase
+                        });
+                    }
+                }
+
+                // Sort by amplitude
+                this.fourierCircles.sort((a, b) => b.amp - a.amp);
+            }
+
+            generateGoldenPalette(count) {
+                const palette = [];
+
+                for (let i = 0; i < count; i++) {
+                    const t = i / count;
+                    palette.push(this.goldenColor(t));
+                }
+
+                return palette;
+            }
+
+            goldenColor(t) {
+                const hue = (t * this.PHI) % 1.0;
+
+                // HSV to RGB
+                const h = hue * 6;
+                const c = 0.8;
+                const x = c * (1 - Math.abs((h % 2) - 1));
+                const m = 0.2;
+
+                let r, g, b;
+
+                if (h < 1) { r = c; g = x; b = 0; }
+                else if (h < 2) { r = x; g = c; b = 0; }
+                else if (h < 3) { r = 0; g = c; b = x; }
+                else if (h < 4) { r = 0; g = x; b = c; }
+                else if (h < 5) { r = x; g = 0; b = c; }
+                else { r = c; g = 0; b = x; }
+
+                return new THREE.Vector3(r + m, g + m, b + m);
+            }
+
+            isPrime(n) {
+                if (n < 2) return false;
+                if (n === 2) return true;
+                if (n % 2 === 0) return false;
+
+                for (let i = 3; i * i <= n; i += 2) {
+                    if (n % i === 0) return false;
+                }
+
+                return true;
+            }
+
+            reset() {
+                this.time = 0;
+                this.lissajousPoints = [];
+                this.fourierCircles = [];
+                this.setupVoronoiSeeds();
+                this.updateVoronoiSeeds();
+                this.updateLissajousCurve();
+            }
+
+            screenshot() {
+                this.renderer.render(this.scene, this.camera);
+
+                this.canvas.toBlob((blob) => {
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.download = `living-theorem-${Date.now()}.png`;
+                    link.href = url;
+                    link.click();
+                    URL.revokeObjectURL(url);
+                });
+            }
+
+            toggleGIFRecording() {
+                if (this.isRecording) {
+                    this.isRecording = false;
+                    alert('GIF recording stopped. (FFmpeg.wasm integration needed for actual export)');
+                    this.recordedFrames = [];
+                } else {
+                    this.isRecording = true;
+                    this.recordedFrames = [];
+                    alert('GIF recording started. Press G again to stop.');
+                }
+            }
+
+            update(deltaTime) {
+                if (this.params.paused) return;
+
+                this.time += deltaTime * this.params.timeScale;
+
+                // Update Voronoi seeds (drift)
+                const drift = this.params.voronoiDrift * deltaTime * 0.1;
+                for (let i = 0; i < this.voronoiSeeds.length; i++) {
+                    const angle = this.time * 0.5 + i * Math.PI * 2 / this.voronoiSeeds.length;
+                    this.voronoiSeeds[i].x += Math.cos(angle) * drift;
+                    this.voronoiSeeds[i].y += Math.sin(angle) * drift;
+
+                    // Wrap around
+                    this.voronoiSeeds[i].x = (this.voronoiSeeds[i].x % 1.0 + 1.0) % 1.0;
+                    this.voronoiSeeds[i].y = (this.voronoiSeeds[i].y % 1.0 + 1.0) % 1.0;
+                }
+
+                const seedsArray = new Float32Array(64);
+                for (let i = 0; i < this.voronoiSeeds.length; i++) {
+                    seedsArray[i * 2] = this.voronoiSeeds[i].x;
+                    seedsArray[i * 2 + 1] = this.voronoiSeeds[i].y;
+                }
+                this.voronoiUniforms.uVoronoiSeeds.value = seedsArray;
+
+                // Update uniforms
+                this.voronoiUniforms.uTime.value = this.time;
+                this.voronoiUniforms.uMandelbrotDepth.value = this.params.mandelbrotDepth;
+                this.voronoiUniforms.uRoseK.value = this.params.roseK;
+
+                if (this.particles) {
+                    this.particles.material.uniforms.uTime.value = this.time;
+                    this.particles.material.uniforms.uSize.value = this.params.particleSize;
+                    this.particles.material.uniforms.uFlowSpeed.value = this.params.flowSpeed;
+                    this.particles.rotation.y = this.time * 0.1;
+                }
+
+                if (this.lissajousMaterial) {
+                    this.lissajousMaterial.uniforms.uTime.value = this.time;
+                }
+
+                // Polyhedron morphing
+                if (this.polyhedron) {
+                    const breathe = 1.0 + 0.1 * Math.sin(this.time * this.PHI);
+                    this.polyhedron.scale.setScalar(breathe);
+                    this.polyhedron.rotation.x = this.time * 0.3;
+                    this.polyhedron.rotation.y = this.time * 0.2 * this.PHI;
+                }
+
+                // Harmonic symmetry pulse
+                const symmetryPulse = Math.floor(this.time * 0.5) % 4;
+                this.params.symmetryAngle = symmetryPulse * Math.PI / 2;
+            }
+
+            render() {
+                // Visibility toggles
+                this.voronoiPlane.visible = this.params.showVoronoi;
+                this.particles.visible = this.params.showParticles;
+                this.lissajousLine.visible = this.params.showLissajous && this.lissajousPoints.length > 0;
+                this.polyhedron.visible = this.params.showPolyhedron;
+
+                this.renderer.render(this.scene, this.camera);
+
+                if (this.isRecording) {
+                    // Placeholder for GIF frame capture
+                    // Would need FFmpeg.wasm integration
+                }
+            }
+
+            animate() {
+                requestAnimationFrame(() => this.animate());
+
+                const deltaTime = this.clock.getDelta();
+                this.update(deltaTime);
+                this.render();
+            }
+        }
+
+        // Start the application
+        window.addEventListener('DOMContentLoaded', () => {
+            new LivingTheorem();
+        });
+    </script>
+</body>
+</html>

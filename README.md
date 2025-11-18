@@ -1,19 +1,28 @@
-# Living Theorem
+# Living Theorem 2.0
 
-**A single-canvas mathematical art playground fusing 10+ classic concepts into one living, breathing visualization.**
+**A mind-bending mathematical art playground fusing 15+ classic concepts including 4D geometry and chaos theory into one living, breathing visualization.**
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-2.0.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Three.js](https://img.shields.io/badge/three.js-r169-orange)
+![Three.js](https://img.shields.io/badge/three.js-0.160-orange)
+![Dimensions](https://img.shields.io/badge/dimensions-4D-purple)
 
 ## 🎨 Overview
 
-Living Theorem is an interactive WebGL art application that brings together fundamental mathematical concepts into a unified, real-time visualization. Watch as Voronoi diagrams morph, fractals zoom infinitely, particles breathe harmonically, and your drawings decompose into Fourier epicycles—all governed by the golden ratio.
+Living Theorem 2.0 is an interactive WebGL art application that brings together fundamental mathematical concepts from multiple dimensions into a unified, real-time visualization. Watch as:
+- **4D hypercubes** rotate through higher dimensions
+- **Voronoi diagrams** morph with their **Delaunay duals**
+- **Lorenz attractors** draw chaotic butterfly trails
+- **Mandelbrot fractals** zoom infinitely within each cell
+- **Metaballs** flow in torus-knot patterns
+- Your drawings decompose into **Fourier epicycles**
+- Everything governed by the **golden ratio**
 
 ## ✨ Features
 
-### 10 Interconnected Mathematical Concepts
+### 15+ Interconnected Mathematical Concepts
 
+#### Core Visualizations
 1. **Voronoi Tessellation** - Dynamic Voronoi diagram with drifting seeds arranged using golden angle spirals
 2. **Mandelbrot Fractals** - Infinite fractal zoom embedded within each Voronoi cell
 3. **Golden Ratio (φ) System** - All colors, layouts, and timing based on φ = 1.618...
@@ -24,6 +33,13 @@ Living Theorem is an interactive WebGL art application that brings together fund
 8. **Harmonic Symmetry** - Periodic rotational symmetry pulses (90°, 180°)
 9. **Particle Systems** - 10,000 particles distributed via Fibonacci sphere
 10. **Golden Color Palettes** - All hues derived from φ progressions
+
+#### 🆕 Advanced Features (NEW in 2.0!)
+11. **4D Hypercube (Tesseract)** - Real-time 4D→3D projection with multi-plane rotation
+12. **Delaunay Triangulation** - Dynamic mesh dual of Voronoi tessellation
+13. **Lorenz Attractor** - Chaotic butterfly system with 5000-point trail
+14. **Metaballs** - 8 implicit surface spheres flowing in torus-knot patterns
+15. **3D Curl Noise** - Divergence-free flow fields for organic particle motion
 
 ## 🎮 Controls
 
@@ -59,7 +75,12 @@ The dat.GUI panel (top-right) provides real-time control over:
 - **Particles**: Size, flow speed, count
 - **Time**: Global time scale, pause state
 - **Polyhedron**: Morph factor between shapes
-- **Layers**: Individual visibility toggles
+- **🆕 Advanced Features**:
+  - **4D Hypercube**: Rotation speed control
+  - **Lorenz Attractor**: σ (sigma), ρ (rho), β (beta) parameters
+  - **Delaunay Mesh**: Toggle triangulation overlay
+  - **Metaballs**: Toggle implicit surface spheres
+- **Layers**: Individual visibility toggles for all systems
 
 ## 🔬 Mathematical Explanations
 
@@ -149,6 +170,72 @@ Particles placed using:
 
 This achieves perfectly uniform distribution on a sphere.
 
+### 🆕 4D Hypercube (Tesseract)
+
+A tesseract is a 4D cube with 16 vertices and 32 edges. We project it to 3D using:
+
+**4D Rotation matrices** (multiple planes):
+```
+Rotation in XY plane: R_xy(θ)
+Rotation in ZW plane: R_zw(φ)
+Rotation in XZ plane: R_xz(α)
+Rotation in YW plane: R_yw(β)
+```
+
+**Perspective projection** from 4D to 3D:
+```
+scale = distance / (distance - w)
+(x', y', z') = (x × scale, y × scale, z × scale)
+```
+
+The tesseract appears to morph as it rotates through the 4th dimension.
+
+### 🆕 Lorenz Attractor
+
+The Lorenz system is a set of chaotic differential equations:
+
+```
+dx/dt = σ(y - x)
+dy/dt = x(ρ - z) - y
+dz/dt = xy - βz
+```
+
+**Classic parameters**:
+- σ (sigma) = 10 - Prandtl number
+- ρ (rho) = 28 - Rayleigh number
+- β (beta) = 8/3 - Physical dimension
+
+Creates the famous "butterfly attractor" - a strange attractor exhibiting chaos.
+
+### 🆕 Delaunay Triangulation
+
+The Delaunay triangulation is the geometric dual of the Voronoi diagram:
+- Connects points that share a Voronoi edge
+- Maximizes the minimum angle of all triangles
+- No point lies inside the circumcircle of any triangle
+
+Perfect for creating organic mesh structures.
+
+### 🆕 Metaballs & Implicit Surfaces
+
+Metaballs are isosurfaces defined by:
+
+```
+f(x,y,z) = Σ(R_i² / distance_i²)
+```
+
+Where the surface is defined at threshold `f(x,y,z) = T`.
+
+In this implementation, 8 metaballs flow in a torus-knot pattern:
+
+```
+x = (R + r·cos(3t))·cos(t)
+y = (R + r·cos(3t))·sin(t)
+z = r·sin(3t)
+```
+
+Creating a beautiful trefoil knot trajectory.
+
 ## 🚀 Getting Started
 
 ### Quick Start
@@ -183,6 +270,10 @@ This achieves perfectly uniform distribution on a sphere.
 3. **Golden Draw**: Draw spirals matching the golden ratio
 4. **Fractal Deep Dive**: Max out Mandelbrot depth, scroll into infinity
 5. **Harmonic Resonance**: Set rose k to φ (≈1.618)
+6. **🆕 4D Meditation**: Enable only tesseract, slow rotation speed to 0.2
+7. **🆕 Chaos Theory**: Max out Lorenz attractor, tweak σ and ρ parameters
+8. **🆕 Dual Geometry**: Enable both Voronoi and Delaunay, watch the duality
+9. **🆕 Metaball Ballet**: Disable all except metaballs, watch the torus knot dance
 
 ### Artistic Variations
 
@@ -321,12 +412,17 @@ const state = JSON.parse(atob(location.hash.slice(1)));
 
 ## 🔮 Future Enhancements
 
-- [ ] Reaction-diffusion texture layer
-- [ ] Audio reactivity (Web Audio API)
-- [ ] Curl noise flow fields
+- [x] ~~Curl noise flow fields~~ ✅ Added in 2.0!
+- [x] ~~Lorenz attractor integration~~ ✅ Added in 2.0!
+- [x] ~~4D geometry~~ ✅ Added in 2.0!
+- [ ] Reaction-diffusion texture layer (Gray-Scott)
+- [ ] Audio reactivity (Web Audio API + microphone)
 - [ ] Post-processing effects (bloom, chromatic aberration)
-- [ ] Julia set mode toggle
-- [ ] Lorenz attractor integration
+- [ ] Penrose tiling (aperiodic tessellation)
+- [ ] Quaternion Julia sets (4D fractals)
+- [ ] Klein bottle and other 4D surfaces
+- [ ] Hyperbolic tessellations (Poincaré disk)
+- [ ] L-systems for organic growth
 - [ ] VR/AR mode
 - [ ] Multiplayer collaborative canvas
 

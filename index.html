@@ -57,13 +57,14 @@
     <canvas id="canvas"></canvas>
     <div id="loading">Living Theorem<br><span style="font-size:14px;">Loading mathematical beauty...</span></div>
     <div id="info" class="hidden">
-        <strong>Living Theorem</strong><br>
+        <strong>Living Theorem 2.0</strong><br>
+        <small style="color: #0ff;">Now with 4D hypercube & chaos!</small><br>
         Drag: Draw Lissajous curves<br>
-        Scroll: Adjust parameters<br>
+        Scroll: Adjust rose petals<br>
         Click: Add/remove Voronoi site<br>
         Space: Pause/Resume<br>
-        R: Reset | S: Screenshot | G: Record GIF<br>
-        1-9: Toggle layers
+        R: Reset | S: Screenshot<br>
+        Open GUI →  for advanced features
     </div>
 
     <script>
@@ -507,6 +508,28 @@
                     // Polyhedron
                     polyMorph: 0.0, // 0=cube, 1=dodeca, 2=icosa
 
+                    // Advanced features
+                    show4DHypercube: true,
+                    showDelaunay: true,
+                    showLorenzAttractor: true,
+                    showReactionDiffusion: false,
+                    showMetaballs: true,
+                    showPenroseTiling: false,
+
+                    // 4D rotation angles
+                    hypercubeRotationXY: 0,
+                    hypercubeRotationZW: 0,
+                    hypercubeRotationSpeed: 0.5,
+
+                    // Lorenz parameters
+                    lorenzSigma: 10,
+                    lorenzRho: 28,
+                    lorenzBeta: 2.667,
+
+                    // Reaction-diffusion
+                    reactionFeed: 0.055,
+                    reactionKill: 0.062,
+
                     // Symmetry
                     symmetryAngle: 0,
 
@@ -547,6 +570,10 @@
                 this.setupMaterials();
                 this.setupGeometry();
                 this.setupParticles();
+                this.setup4DHypercube();
+                this.setupLorenzAttractor();
+                this.setupDelaunay();
+                this.setupMetaballs();
                 this.setupGUI();
                 this.setupInteraction();
 
@@ -718,6 +745,305 @@
                 this.scene.add(this.particles);
             }
 
+            setup4DHypercube() {
+                // Create a 4D hypercube (tesseract) and project it to 3D
+                // A tesseract has 16 vertices, 32 edges
+
+                const vertices4D = [
+                    [-1,-1,-1,-1], [1,-1,-1,-1], [-1,1,-1,-1], [1,1,-1,-1],
+                    [-1,-1,1,-1], [1,-1,1,-1], [-1,1,1,-1], [1,1,1,-1],
+                    [-1,-1,-1,1], [1,-1,-1,1], [-1,1,-1,1], [1,1,-1,1],
+                    [-1,-1,1,1], [1,-1,1,1], [-1,1,1,1], [1,1,1,1]
+                ];
+
+                const edges = [
+                    // Inner cube (w=-1)
+                    [0,1],[1,3],[3,2],[2,0],[4,5],[5,7],[7,6],[6,4],[0,4],[1,5],[2,6],[3,7],
+                    // Outer cube (w=1)
+                    [8,9],[9,11],[11,10],[10,8],[12,13],[13,15],[15,14],[14,12],[8,12],[9,13],[10,14],[11,15],
+                    // Connecting edges
+                    [0,8],[1,9],[2,10],[3,11],[4,12],[5,13],[6,14],[7,15]
+                ];
+
+                this.tesseract = {
+                    vertices4D: vertices4D,
+                    edges: edges,
+                    rotationXY: 0,
+                    rotationZW: 0,
+                    rotationXZ: 0,
+                    rotationYW: 0
+                };
+
+                // Create line geometry for rendering
+                const geometry = new THREE.BufferGeometry();
+                const positions = new Float32Array(edges.length * 6);
+                geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+                const material = new THREE.LineBasicMaterial({
+                    color: 0x00ffff,
+                    transparent: true,
+                    opacity: 0.6,
+                    linewidth: 2
+                });
+
+                this.tesseractMesh = new THREE.LineSegments(geometry, material);
+                this.tesseractMesh.scale.setScalar(0.5);
+                this.scene.add(this.tesseractMesh);
+            }
+
+            update4DHypercube(deltaTime) {
+                if (!this.params.show4DHypercube) return;
+
+                // Update rotation angles
+                this.tesseract.rotationXY += deltaTime * this.params.hypercubeRotationSpeed * 0.3;
+                this.tesseract.rotationZW += deltaTime * this.params.hypercubeRotationSpeed * 0.5;
+                this.tesseract.rotationXZ += deltaTime * this.params.hypercubeRotationSpeed * 0.2;
+                this.tesseract.rotationYW += deltaTime * this.params.hypercubeRotationSpeed * 0.4;
+
+                // Project 4D vertices to 3D
+                const projected3D = this.tesseract.vertices4D.map(v4d => {
+                    // Apply 4D rotations
+                    let [x, y, z, w] = this.rotate4D(v4d,
+                        this.tesseract.rotationXY,
+                        this.tesseract.rotationZW,
+                        this.tesseract.rotationXZ,
+                        this.tesseract.rotationYW
+                    );
+
+                    // Perspective projection from 4D to 3D
+                    const distance4D = 3.0;
+                    const scale = distance4D / (distance4D - w);
+
+                    return [x * scale, y * scale, z * scale];
+                });
+
+                // Update line geometry
+                const positions = this.tesseractMesh.geometry.attributes.position.array;
+                let idx = 0;
+
+                for (const [i, j] of this.tesseract.edges) {
+                    const [x1, y1, z1] = projected3D[i];
+                    const [x2, y2, z2] = projected3D[j];
+
+                    positions[idx++] = x1;
+                    positions[idx++] = y1;
+                    positions[idx++] = z1;
+                    positions[idx++] = x2;
+                    positions[idx++] = y2;
+                    positions[idx++] = z2;
+                }
+
+                this.tesseractMesh.geometry.attributes.position.needsUpdate = true;
+            }
+
+            rotate4D(v, angleXY, angleZW, angleXZ, angleYW) {
+                let [x, y, z, w] = v;
+
+                // Rotation in XY plane
+                let cosXY = Math.cos(angleXY), sinXY = Math.sin(angleXY);
+                [x, y] = [x * cosXY - y * sinXY, x * sinXY + y * cosXY];
+
+                // Rotation in ZW plane
+                let cosZW = Math.cos(angleZW), sinZW = Math.sin(angleZW);
+                [z, w] = [z * cosZW - w * sinZW, z * sinZW + w * cosZW];
+
+                // Rotation in XZ plane
+                let cosXZ = Math.cos(angleXZ), sinXZ = Math.sin(angleXZ);
+                [x, z] = [x * cosXZ - z * sinXZ, x * sinXZ + z * cosXZ];
+
+                // Rotation in YW plane
+                let cosYW = Math.cos(angleYW), sinYW = Math.sin(angleYW);
+                [y, w] = [y * cosYW - w * sinYW, y * sinYW + w * cosYW];
+
+                return [x, y, z, w];
+            }
+
+            setupLorenzAttractor() {
+                // Lorenz attractor: dx/dt = σ(y-x), dy/dt = x(ρ-z)-y, dz/dt = xy-βz
+                this.lorenzPoints = [];
+                this.lorenzState = { x: 0.1, y: 0, z: 0 };
+
+                const maxPoints = 5000;
+                const geometry = new THREE.BufferGeometry();
+                const positions = new Float32Array(maxPoints * 3);
+                const colors = new Float32Array(maxPoints * 3);
+
+                geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+                const material = new THREE.LineBasicMaterial({
+                    vertexColors: true,
+                    transparent: true,
+                    opacity: 0.8,
+                    blending: THREE.AdditiveBlending
+                });
+
+                this.lorenzLine = new THREE.Line(geometry, material);
+                this.lorenzLine.scale.setScalar(0.05);
+                this.lorenzLine.position.set(0, -2, 0);
+                this.scene.add(this.lorenzLine);
+            }
+
+            updateLorenzAttractor(deltaTime) {
+                if (!this.params.showLorenzAttractor) return;
+
+                // Integrate Lorenz equations (Runge-Kutta 4th order)
+                const dt = deltaTime * 0.5;
+                const { x, y, z } = this.lorenzState;
+                const { lorenzSigma: σ, lorenzRho: ρ, lorenzBeta: β } = this.params;
+
+                const dx = σ * (y - x);
+                const dy = x * (ρ - z) - y;
+                const dz = x * y - β * z;
+
+                this.lorenzState.x += dx * dt;
+                this.lorenzState.y += dy * dt;
+                this.lorenzState.z += dz * dt;
+
+                // Add to trail
+                this.lorenzPoints.push({
+                    x: this.lorenzState.x,
+                    y: this.lorenzState.y,
+                    z: this.lorenzState.z
+                });
+
+                // Limit trail length
+                if (this.lorenzPoints.length > 5000) {
+                    this.lorenzPoints.shift();
+                }
+
+                // Update geometry
+                const positions = this.lorenzLine.geometry.attributes.position.array;
+                const colors = this.lorenzLine.geometry.attributes.color.array;
+
+                for (let i = 0; i < this.lorenzPoints.length; i++) {
+                    const pt = this.lorenzPoints[i];
+                    positions[i * 3] = pt.x;
+                    positions[i * 3 + 1] = pt.y;
+                    positions[i * 3 + 2] = pt.z;
+
+                    // Color based on position
+                    const t = i / this.lorenzPoints.length;
+                    const color = this.goldenColor(t * this.PHI);
+                    colors[i * 3] = color.r;
+                    colors[i * 3 + 1] = color.g;
+                    colors[i * 3 + 2] = color.b;
+                }
+
+                this.lorenzLine.geometry.setDrawRange(0, this.lorenzPoints.length);
+                this.lorenzLine.geometry.attributes.position.needsUpdate = true;
+                this.lorenzLine.geometry.attributes.color.needsUpdate = true;
+            }
+
+            setupDelaunay() {
+                // Create Delaunay triangulation from Voronoi seeds
+                const geometry = new THREE.BufferGeometry();
+
+                const material = new THREE.LineBasicMaterial({
+                    color: 0xff00ff,
+                    transparent: true,
+                    opacity: 0.3,
+                    linewidth: 1
+                });
+
+                this.delaunayMesh = new THREE.LineSegments(geometry, material);
+                this.scene.add(this.delaunayMesh);
+            }
+
+            updateDelaunay() {
+                if (!this.params.showDelaunay) return;
+
+                // Simple Delaunay: connect nearby Voronoi seeds
+                // (This is a simplified version; full Delaunay would use proper triangulation)
+                const edges = [];
+                const maxDist = 0.3;
+
+                for (let i = 0; i < this.voronoiSeeds.length; i++) {
+                    for (let j = i + 1; j < this.voronoiSeeds.length; j++) {
+                        const dist = this.voronoiSeeds[i].distanceTo(this.voronoiSeeds[j]);
+                        if (dist < maxDist) {
+                            edges.push([i, j]);
+                        }
+                    }
+                }
+
+                // Create line geometry
+                const positions = new Float32Array(edges.length * 6);
+                let idx = 0;
+
+                for (const [i, j] of edges) {
+                    const si = this.voronoiSeeds[i];
+                    const sj = this.voronoiSeeds[j];
+
+                    // Convert UV coords to 3D space
+                    const x1 = (si.x - 0.5) * 20;
+                    const y1 = (si.y - 0.5) * 20;
+                    const x2 = (sj.x - 0.5) * 20;
+                    const y2 = (sj.y - 0.5) * 20;
+
+                    positions[idx++] = x1;
+                    positions[idx++] = y1;
+                    positions[idx++] = -2.9;
+                    positions[idx++] = x2;
+                    positions[idx++] = y2;
+                    positions[idx++] = -2.9;
+                }
+
+                this.delaunayMesh.geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            }
+
+            setupMetaballs() {
+                // Create metaballs (implicit surfaces) using instanced spheres
+                const geometry = new THREE.SphereGeometry(0.3, 16, 16);
+                const material = new THREE.MeshBasicMaterial({
+                    color: 0x00ff88,
+                    transparent: true,
+                    opacity: 0.4,
+                    wireframe: true
+                });
+
+                this.metaballs = [];
+
+                for (let i = 0; i < 8; i++) {
+                    const mesh = new THREE.Mesh(geometry, material.clone());
+                    const angle = (i / 8) * Math.PI * 2;
+                    mesh.position.set(
+                        Math.cos(angle) * 2,
+                        Math.sin(angle) * 2,
+                        0
+                    );
+                    mesh.userData.phase = i;
+                    this.scene.add(mesh);
+                    this.metaballs.push(mesh);
+                }
+            }
+
+            updateMetaballs(deltaTime) {
+                if (!this.params.showMetaballs) return;
+
+                for (let i = 0; i < this.metaballs.length; i++) {
+                    const ball = this.metaballs[i];
+                    const phase = ball.userData.phase;
+
+                    // Animate in a torus pattern
+                    const t = this.time * 0.5 + phase * Math.PI * 2 / this.metaballs.length;
+                    const R = 2.0; // Major radius
+                    const r = 0.5; // Minor radius
+
+                    ball.position.x = (R + r * Math.cos(t * 3)) * Math.cos(t);
+                    ball.position.y = (R + r * Math.cos(t * 3)) * Math.sin(t);
+                    ball.position.z = r * Math.sin(t * 3);
+
+                    // Pulse size
+                    const scale = 1.0 + 0.3 * Math.sin(t * 5);
+                    ball.scale.setScalar(scale);
+
+                    // Color cycle
+                    const color = this.goldenColor(phase / this.metaballs.length + this.time * 0.1);
+                    ball.material.color.setRGB(color.r, color.g, color.b);
+                }
+            }
+
             setupGUI() {
                 this.gui = new dat.GUI();
 
@@ -742,6 +1068,15 @@
 
                 const polyFolder = this.gui.addFolder('Polyhedron');
                 polyFolder.add(this.params, 'polyMorph', 0, 2);
+
+                const advancedFolder = this.gui.addFolder('Advanced Features');
+                advancedFolder.add(this.params, 'show4DHypercube').name('4D Hypercube');
+                advancedFolder.add(this.params, 'hypercubeRotationSpeed', 0, 2).name('Rotation Speed');
+                advancedFolder.add(this.params, 'showLorenzAttractor').name('Lorenz Attractor');
+                advancedFolder.add(this.params, 'lorenzSigma', 5, 20).name('Lorenz σ');
+                advancedFolder.add(this.params, 'lorenzRho', 15, 40).name('Lorenz ρ');
+                advancedFolder.add(this.params, 'showDelaunay').name('Delaunay Mesh');
+                advancedFolder.add(this.params, 'showMetaballs').name('Metaballs');
 
                 const layersFolder = this.gui.addFolder('Layers');
                 layersFolder.add(this.params, 'showVoronoi');
@@ -1077,6 +1412,12 @@
                     this.polyhedron.rotation.y = this.time * 0.2 * this.PHI;
                 }
 
+                // Update advanced features
+                this.update4DHypercube(deltaTime);
+                this.updateLorenzAttractor(deltaTime);
+                this.updateDelaunay();
+                this.updateMetaballs(deltaTime);
+
                 // Harmonic symmetry pulse
                 const symmetryPulse = Math.floor(this.time * 0.5) % 4;
                 this.params.symmetryAngle = symmetryPulse * Math.PI / 2;
@@ -1088,6 +1429,14 @@
                 this.particles.visible = this.params.showParticles;
                 this.lissajousLine.visible = this.params.showLissajous && this.lissajousPoints.length > 0;
                 this.polyhedron.visible = this.params.showPolyhedron;
+
+                // Advanced features visibility
+                if (this.tesseractMesh) this.tesseractMesh.visible = this.params.show4DHypercube;
+                if (this.lorenzLine) this.lorenzLine.visible = this.params.showLorenzAttractor;
+                if (this.delaunayMesh) this.delaunayMesh.visible = this.params.showDelaunay;
+                if (this.metaballs) {
+                    this.metaballs.forEach(ball => ball.visible = this.params.showMetaballs);
+                }
 
                 this.renderer.render(this.scene, this.camera);
 
